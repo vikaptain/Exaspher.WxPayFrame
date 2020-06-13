@@ -1,7 +1,7 @@
-﻿using System.Collections.Generic;
+﻿using Exaspher.WxPay.Core;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Web.Http;
-using Exaspher.WxPayFrame.Core;
 
 namespace Exaspher.WxPayFrame.Web.Controllers
 {
@@ -17,7 +17,7 @@ namespace Exaspher.WxPayFrame.Web.Controllers
 		public async Task<string> Get(int id)
 		{
 			WxPayService service = new WxPayService();
-			await service.NewApplyMent();
+			await service.ApplyMent();
 			return "value";
 		}
 

@@ -1,5 +1,8 @@
-﻿using System;
+﻿using Exaspher.WxPayFrame.Core.Dto;
+using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -7,21 +10,29 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
-using APPBackstage.Services.WxMerchant;
-using APPBackstage.Services.WxMerchant.Dto;
-using Newtonsoft.Json;
 
-namespace Exaspher.WxPayFrame.Core
+namespace Exaspher.WxPay.Core
 {
 	public class WxPayService : IWxPayService
 	{
+		// private readonly IConfiguration _configuration;
+		// private readonly IHostEnvironment _hostEnvironment;
+
+		private readonly string _mchId;
+		private readonly string _serialNo;
+
 		public WxPayService()
 		{
+			//_configuration = configuration;
+			//_hostEnvironment = hostEnvironment;
+
+			_mchId = ConfigurationManager.AppSettings["WxPay:MchId"];  //_configuration.GetValue<string>("WxPay:MchId");
+			_serialNo = ConfigurationManager.AppSettings["WxPay:SerialNo"]; // _configuration.GetValue<string>("WxPay:SerialNo");
 		}
 
-		public async Task<object> NewApplyMent()
+		public async Task<object> ApplyMent()
 		{
-			var nonce = "123456789";// NumberUtil.NewTimeCode();
+			var nonce = GenerateNonce();
 
 			#region 传入数据
 
@@ -97,32 +108,23 @@ namespace Exaspher.WxPayFrame.Core
 
 			#endregion 传入数据
 
-			try
+			var jsonContent = JsonConvert.SerializeObject(applyment); //.Serialize(applyment);
+
+			var httpHandler = new HttpHandler(_mchId, _serialNo, GetPublicCertificate().SerialNumber, GetPrivateCertificate(), GetMerchantCertificate());
+			var client = new HttpClient(httpHandler);
+
+			var request = new HttpRequestMessage(HttpMethod.Post,
+				"https://api.mch.weixin.qq.com/v3/applyment4sub/applyment/")
 			{
-				var jsonContent = JsonConvert.SerializeObject(applyment); //.Serialize(applyment);
+				Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
+			};
 
-				var httpHandler = new HttpHandler(GetPublicCertificate().SerialNumber, GetMerchantCertificate());
-				var client = new HttpClient(httpHandler);
-
-				var request = new HttpRequestMessage(HttpMethod.Post,
-					"https://api.mch.weixin.qq.com/v3/applyment4sub/applyment/")
-				{
-					Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
-				};
-
-				using (var response = await client.SendAsync(request))
-				{
-					var result = await response.Content.ReadAsStringAsync();
-					//LogHelper.WriteLog("result:"+ result);
-					if (response.StatusCode != HttpStatusCode.OK)
-					{
-					}
-				}
-			}
-			catch (Exception exp)
+			var response = await client.SendAsync(request);
+			var result = await response.Content.ReadAsStringAsync();
+			if (response.StatusCode != HttpStatusCode.OK)
 			{
-				// LogHelper.WriteLog(exp);
 			}
+
 			return string.Empty;
 		}
 
@@ -139,14 +141,13 @@ namespace Exaspher.WxPayFrame.Core
 
 			HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "https://api.mch.weixin.qq.com/v3/certificates");
 
-			client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("WECHATPAY2-SHA256-RSA2048", await BuildAuthAsync(request, nonce_str));
+			client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("WECHATPAY2-SHA256-RSA2048", await BuildAuthAsync(request, _mchId, _serialNo, nonce_str));
 			client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
 			var response = await client.SendAsync(request);
 			var result = await response.Content.ReadAsStringAsync();
 			if (response.StatusCode != HttpStatusCode.OK)
 			{
-				// LogHelper.WriteLog(result);
 			}
 		}
 
@@ -177,37 +178,24 @@ namespace Exaspher.WxPayFrame.Core
 
 			var jsonContent = JsonConvert.SerializeObject(meta);
 
-			var httpHandler = new HttpHandler(GetPublicCertificate().SerialNumber, GetMerchantCertificate(), jsonContent);
+			var httpHandler = new HttpHandler(_mchId, _serialNo, GetPublicCertificate().SerialNumber, GetPrivateCertificate(), GetMerchantCertificate(), jsonContent);
 			var client = new HttpClient(httpHandler);
-			using (var requestContent = new MultipartFormDataContent(boundary))
-			{
-				requestContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data"); //这里必须添加
-				requestContent.Add(new StringContent(jsonContent, Encoding.UTF8, "application/json"), "\"meta\"");
+			using var requestContent = new MultipartFormDataContent(boundary);
+			requestContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data"); //这里必须添加
+			requestContent.Add(new StringContent(jsonContent, Encoding.UTF8, "application/json"), "\"meta\"");
 
-				var byteArrayContent = new ByteArrayContent(buffer);
-				byteArrayContent.Headers.ContentType = new MediaTypeHeaderValue("image/jpg");
-				requestContent.Add(byteArrayContent, "\"file\"", "\"" + meta.filename + "\"");  //这里主要必须要双引号
-				using (var response = await client.PostAsync("https://api.mch.weixin.qq.com/v3/merchant/media/upload", requestContent))
-				{
-					using (var responseContent = response.Content)
-					{
-						var responseBody = await responseContent.ReadAsStringAsync(); //这里就可以拿到图片id了
-						if (string.IsNullOrWhiteSpace(responseBody))
-						{
-							return string.Empty;
-						}
-						UploadImgDto result = JsonConvert.DeserializeObject<UploadImgDto>(responseBody);
-						return result.media_id;
-
-						//{"media_id":"0ya3CVbXoh7XvPjsgLSyNr4a-ku8ycqGu5xUVzqXBiw-EHOc6yi1G1e0CJ0bKv7ZQXFJ3XUGesTCnYB7lwUcrx5GrJsTlg75NkVUY7_ap1c"}
-						// return ResultHelper.QuickReturn(responseBody);
-					}
-				}
-			}
+			var byteArrayContent = new ByteArrayContent(buffer);
+			byteArrayContent.Headers.ContentType = new MediaTypeHeaderValue("image/jpg");
+			requestContent.Add(byteArrayContent, "\"file\"", "\"" + meta.filename + "\"");  //这里主要必须要双引号
+			using var response = await client.PostAsync("https://api.mch.weixin.qq.com/v3/merchant/media/upload", requestContent);
+			using var responseContent = response.Content;
+			var responseBody = await responseContent.ReadAsStringAsync(); //这里就可以拿到图片id了
+																		  // return ResultHelper.QuickReturn(responseBody);
 			return string.Empty;
+			//}
 		}
 
-		protected async Task<string> BuildAuthAsync(HttpRequestMessage request, string nonce, string jsonStr = "")
+		protected async Task<string> BuildAuthAsync(HttpRequestMessage request, string mchid, string serialNo, string nonce, string jsonStr = "")
 		{
 			string method = request.Method.ToString();
 			string body = "";
@@ -231,7 +219,7 @@ namespace Exaspher.WxPayFrame.Core
 
 			string message = $"{method}\n{uri}\n{timestamp}\n{nonce}\n{body}\n";
 			string signature = string.Empty; // Sign(message);
-			return $"mchid=\"{WxConfig.MchId}\",nonce_str=\"{nonce}\",timestamp=\"{timestamp}\",serial_no=\"{WxConfig.SerialNo}\",signature=\"{signature}\"";
+			return $"mchid=\"{mchid}\",nonce_str=\"{nonce}\",timestamp=\"{timestamp}\",serial_no=\"{serialNo}\",signature=\"{signature}\"";
 		}
 
 		//protected string Sign(string message)
@@ -252,7 +240,7 @@ namespace Exaspher.WxPayFrame.Core
 
 		public X509Certificate2 GetPublicCertificate()
 		{
-			var path = AppDomain.CurrentDomain.BaseDirectory + WxConfig.CertPublicPath; // _configuration.GetValue<string>("WxPay:PublicKey");
+			var path = AppDomain.CurrentDomain.BaseDirectory + ConfigurationManager.AppSettings["WxPay:PublicKey"]; // _configuration.GetValue<string>("WxPay:PublicKey");
 			var cert = new X509Certificate2(path, string.Empty,
 				X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.MachineKeySet);
 			// cert.PublicKey.Key
@@ -282,12 +270,28 @@ namespace Exaspher.WxPayFrame.Core
 			//return rsa;
 		}
 
+		public RSA GetPrivateCertificate()
+		{
+
+			return null;
+
+			//var path = AppDomain.CurrentDomain.BaseDirectory + ConfigurationManager.AppSettings["WxPay:PrivateKey"];
+			//var cert = new X509Certificate2(path, ConfigurationManager.AppSettings["WxPay:PrivateKeyPassword"],
+			//	X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.MachineKeySet);
+			//return cert.PrivateKey as RSA;
+		}
+
+		private string GenerateNonce()
+		{
+			return Guid.NewGuid().ToString();
+		}
+
 		public X509Certificate2 GetMerchantCertificate()
 		{
 			//_hostEnvironment.ContentRootPath + _configuration.GetValue<string>("WxPay:MerchantCertificate");
-			var path = AppDomain.CurrentDomain.BaseDirectory + WxConfig.CertPath;
+			var path = AppDomain.CurrentDomain.BaseDirectory + ConfigurationManager.AppSettings["WxPay:MerchantCertificate"];
 			// _configuration.GetValue<string>("WxPay:PrivateKeyPassword")
-			var cert = new X509Certificate2(path, WxConfig.CertPwd,
+			var cert = new X509Certificate2(path, ConfigurationManager.AppSettings["WxPay:PrivateKeyPassword"],
 				X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.MachineKeySet);
 			// var rsa = RSA.Create();
 			return cert;
