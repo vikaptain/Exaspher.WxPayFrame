@@ -48,6 +48,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Dto\ApplyMentDto.cs" />
+    <Compile Include="Dto\JSAPIRequestData.cs" />
     <Compile Include="HttpHandler.cs" />
     <Compile Include="IWxPayService.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

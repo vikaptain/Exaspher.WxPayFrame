@@ -23,6 +23,7 @@ namespace Exaspher.WxPay.Core
 
 		private readonly string _mchId;
 		private readonly string _serialNo;
+		private readonly string _appId;
 
 		public WxPayService()
 		{
@@ -31,6 +32,7 @@ namespace Exaspher.WxPay.Core
 
 			_mchId = ConfigurationManager.AppSettings["WxPay:MchId"];  //_configuration.GetValue<string>("WxPay:MchId");
 			_serialNo = ConfigurationManager.AppSettings["WxPay:SerialNo"]; // _configuration.GetValue<string>("WxPay:SerialNo");
+			_appId = "wx82fbe1be460a3cbf";
 		}
 
 		public async Task<object> ApplyMent()
@@ -574,6 +576,61 @@ namespace Exaspher.WxPay.Core
 			}
 			buff = buff.Trim('&');
 			return buff;
+		}
+
+		public async Task<string> JSAPI()
+		{
+			var data = new JSAPIRequestData()
+			{
+				sp_appid = _appId,
+				sp_mchid = _mchId,
+				sub_mchid = "1600105465",
+				description = "Image形象店-深圳腾大-QQ公仔",
+				out_trade_no = "X" + DateTime.Now.ToString("yyyyMMddHHmmss") + "0001",
+				time_expire = DateTime.Now.AddMinutes(15).ToString("yyyy-MM-ddTHH:mm:ssK"),
+				notify_url = "http://www.weixin.qq.com/wxpay/pay.php",
+				settle_info = new JSAPISettleInfoRequestData()
+				{
+					profit_sharing = true,
+				},
+				amount = new JSAPIAmountRequestData()
+				{
+					total = 1,
+					currency = "CNY",
+				},
+				payer = new JSAPIPlayerRequestData()
+				{
+					sp_openid = "oPFdmxF0Sk1YVYi_IWafv7MR3_pI",
+				}
+			};
+
+			JsonSerializer _jsonWriter = new JsonSerializer
+			{
+				NullValueHandling = NullValueHandling.Ignore
+			};
+
+			var jsonContent = JsonConvert.SerializeObject(data, Formatting.None,
+				new JsonSerializerSettings
+				{
+					NullValueHandling = NullValueHandling.Ignore
+				});
+
+			var httpHandler = new HttpHandler(_mchId, _serialNo, GetPublicCertificate().SerialNumber, GetPrivateCertificate(), GetMerchantCertificate(), jsonContent);
+			var client = new HttpClient(httpHandler);
+
+			var request = new HttpRequestMessage(HttpMethod.Post,
+				"https://api.mch.weixin.qq.com/v3/pay/partner/transactions/jsapi")
+			{
+				Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
+			};
+
+			var response = await client.SendAsync(request);
+			var result = await response.Content.ReadAsStringAsync();
+			if (response.StatusCode != HttpStatusCode.OK)
+			{
+			}
+
+			return string.Empty;
 		}
 	}
 }
