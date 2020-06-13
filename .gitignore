@@ -254,6 +254,5 @@ paket-files/
 
 uploadfiles/
 
-apiclient_cert.p12
-apiclient_cert.pem
-apiclient_key.pem
+cert/
+*.pem

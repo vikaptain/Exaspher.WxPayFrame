@@ -6,7 +6,7 @@ namespace Exaspher.WxPay.Core
 	{
 		Task<object> ApplyMent();
 
-		Task GetCertificates();
+		Task UpdateCertificates();
 
 		Task<string> Upload(string filename, byte[] buffer);
 	}

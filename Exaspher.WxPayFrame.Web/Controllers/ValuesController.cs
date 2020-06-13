@@ -17,7 +17,7 @@ namespace Exaspher.WxPayFrame.Web.Controllers
 		public async Task<string> Get(int id)
 		{
 			WxPayService service = new WxPayService();
-			await service.JSAPI();
+			await service.UpdateCertificates();
 			return "value";
 		}
 

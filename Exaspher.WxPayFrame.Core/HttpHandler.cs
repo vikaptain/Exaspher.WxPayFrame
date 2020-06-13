@@ -81,7 +81,10 @@ namespace Exaspher.WxPay.Core
 				else
 				{
 					var content = request.Content;
-					body = await content.ReadAsStringAsync();
+					if (content != null)
+					{
+						body = await content?.ReadAsStringAsync();
+					}
 				}
 			}
 			var uri = request.RequestUri.PathAndQuery;

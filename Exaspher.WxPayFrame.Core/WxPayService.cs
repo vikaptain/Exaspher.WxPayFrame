@@ -1,5 +1,8 @@
 ﻿using Exaspher.WxPayFrame.Core.Dto;
 using Newtonsoft.Json;
+using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Modes;
+using Org.BouncyCastle.Crypto.Parameters;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
@@ -133,27 +136,38 @@ namespace Exaspher.WxPay.Core
 			return string.Empty;
 		}
 
-		public async Task GetCertificates()
+		/// <summary>
+		/// 更新微信平台证书
+		/// </summary>
+		/// <returns></returns>
+		public async Task UpdateCertificates()
 		{
-			HttpClient client = new HttpClient();
-
-			//var mchid = _configuration.GetValue<string>("WxPay:MchId");
-			//var serial_no = _configuration.GetValue<string>("WxPay:SerialNo");
-
-			var nonce_str = Guid.NewGuid().ToString();
-			TimeSpan ts = DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, 0);
-			var timestamp = Convert.ToInt64(ts.TotalSeconds).ToString();
-
-			HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, "https://api.mch.weixin.qq.com/v3/certificates");
-
-			client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("WECHATPAY2-SHA256-RSA2048", await BuildAuthAsync(request, _mchId, _serialNo, nonce_str));
-			client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
+			var httpHandler = new HttpHandler(_mchId, _serialNo, string.Empty, GetPrivateCertificate(), GetMerchantCertificate(), string.Empty);
+			var client = new HttpClient(httpHandler);
+			var request = new HttpRequestMessage(HttpMethod.Get, "https://api.mch.weixin.qq.com/v3/certificates");
 			var response = await client.SendAsync(request);
 			var result = await response.Content.ReadAsStringAsync();
 			if (response.StatusCode != HttpStatusCode.OK)
 			{
 			}
+			var obj = JsonConvert.DeserializeObject<CertificatesResult>(result);
+
+			// obj.data[0].effective_time 证书启用时间
+
+			var str = AesGcmDecrypt(obj.data[0].encrypt_certificate.associated_data, obj.data[0].encrypt_certificate.nonce,
+				obj.data[0].encrypt_certificate.ciphertext);
+
+			var path = AppDomain.CurrentDomain.BaseDirectory + ConfigurationManager.AppSettings["WxPay:PublicKey"];
+			if (File.Exists(path) && GetPublicCertificate().SerialNumber != obj.data[0].serial_no)
+			{
+				return;
+			}
+
+			var publicKeyFile = File.OpenWrite(path);
+			var buffer = Encoding.UTF8.GetBytes(str);
+			publicKeyFile.Write(buffer, 0, buffer.Length);
+			publicKeyFile.Flush(true);
+			publicKeyFile.Close();
 		}
 
 		public async Task<string> Upload(string fileName, byte[] buffer)
@@ -623,7 +637,6 @@ namespace Exaspher.WxPay.Core
 			{
 				Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
 			};
-
 			var response = await client.SendAsync(request);
 			var result = await response.Content.ReadAsStringAsync();
 			if (response.StatusCode != HttpStatusCode.OK)
@@ -631,6 +644,28 @@ namespace Exaspher.WxPay.Core
 			}
 
 			return string.Empty;
+		}
+
+		private static string ALGORITHM = "AES/GCM/NoPadding";
+		private static int TAG_LENGTH_BIT = 128;
+		private static int NONCE_LENGTH_BYTE = 12;
+		private static string AES_KEY = "4fe39D4b90104586162cfDc68f874A68";
+
+		public static string AesGcmDecrypt(string associatedData, string nonce, string ciphertext)
+		{
+			GcmBlockCipher gcmBlockCipher = new GcmBlockCipher(new AesEngine());
+			AeadParameters aeadParameters = new AeadParameters(
+				new KeyParameter(Encoding.UTF8.GetBytes(AES_KEY)),
+				128,
+				Encoding.UTF8.GetBytes(nonce),
+				Encoding.UTF8.GetBytes(associatedData));
+			gcmBlockCipher.Init(false, aeadParameters);
+
+			byte[] data = Convert.FromBase64String(ciphertext);
+			byte[] plaintext = new byte[gcmBlockCipher.GetOutputSize(data.Length)];
+			int length = gcmBlockCipher.ProcessBytes(data, 0, data.Length, plaintext, 0);
+			gcmBlockCipher.DoFinal(plaintext, length);
+			return Encoding.UTF8.GetString(plaintext);
 		}
 	}
 }
