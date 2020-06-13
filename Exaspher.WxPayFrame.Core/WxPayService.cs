@@ -27,6 +27,7 @@ namespace Exaspher.WxPay.Core
 		private readonly string _mchId;
 		private readonly string _serialNo;
 		private readonly string _appId;
+		private readonly string _privateKey;
 
 		public WxPayService()
 		{
@@ -36,6 +37,32 @@ namespace Exaspher.WxPay.Core
 			_mchId = ConfigurationManager.AppSettings["WxPay:MchId"];  //_configuration.GetValue<string>("WxPay:MchId");
 			_serialNo = ConfigurationManager.AppSettings["WxPay:SerialNo"]; // _configuration.GetValue<string>("WxPay:SerialNo");
 			_appId = "wx82fbe1be460a3cbf";
+			_privateKey = @"MIIEwAIBADANBgkqhkiG9w0BAQEFAASCBKowggSmAgEAAoIBAQCuer7ujvbwQfjD
+oPDC5k96oNeiAhK16B4EZJX1iv2xapfaeVlTHE3XUQmW3sFcZk7MC3zQK3qj5SVr
+VkD41dg/KdKoWx589O75Mm3qhKl9nqR2jth07ruAEk3dbKRNbS1JvrXpa1rLDs/y
+7kNzdoehFytekpTbCwVvhgRFYG65ECM/JE6gHv2TpOcsDtvz2D+MdeS4l3XRgiQf
+khtRdRP59mwa+wI7BNWIphHMbQQ9Kbl/fkxlIsjM5RZdLJ2il6DYceBeiTLX2IpW
+oitc5sDZpnwNYfZVQEu/JUALX5U4BK9IJwJRvK7lKPSTXYpC4R+Xxr1CnCFd0ILf
+9lyUMCnzAgMBAAECggEBAIpjpz82O9zSpsobw/sCi7W7D21bcZXAttZLJbos9Q2c
+ezd5GoVWJNOMXivBIOL17rfewK+oXMzUOnrJXh1AGBX5STHpm+QGrekPu6jQclLF
+2rKCmGMe2684VXQz8JnM56ffURAD6261n/CSVQOm1urJosePQev+8N/FD2wrkYbM
+Wo3dIXBdJIT1U9n9W76nUnAUVToCGhXLf7G3yUDL02Dy1e49l0VdtrJlrDJwhngA
+HCZQpS56737NnFtT9PC6r+hsTzTn1xeewzxm7Q2LZmIfj0FfVacGCwWsG3WGisEo
+KojYLx9702hixCtxFiNZ0nxRBkNak6ao8/tzhB0olWECgYEA5ZyZuWTiQlARXDrZ
++7iE61B8RDkqC0UlL2a0QSIa8B+xM48VLBMOhR65W9VYIQkeN2GqDZEuDdtOpR95
+Tj+c6eAtgM17nToinFiTHjbjLtHD9frbNeWSVfsJYcE0+t4aOGyUUDV9mfbmF99n
+5iqnZ7lDBJvsm3h7jdc01qrmEKMCgYEAwogZ6kCEzX7QQe8tLLmQhSp2n6xy8kYC
+JMw2zjg2KbghTepGizgqQutHliyuLf6r1Pr7Tp3SN4KH+2xqkD0sRASIrF526avs
+sKg99WS8JTLEGxbw6snV+DDECZTIgMDSUbMP+FDrEFwAWBCvEI2TW1H7DZkzvbzi
+xAyk5t+1BnECgYEAxeh897dk7hNlY0G2sakRqGHvOj6rZptqubiklZ936JDog7BI
+Z3zlfwhEbEsvcwoQ6Vtc3+TK9VaaKuk9/ZwG++8mSWbTrWl2e5w88kYM+0YCyfo3
+B/WgdEu0gnWt3K2jnA66p4fzgsm0+c6uF02cjWK5yTc8caUfmdpsyLr1IlECgYEA
+kKceBif12Mzs1aqhv/k4sx0xWmikjO1sGKrWMiBwfjNSaJrF3C5mlp5X/B67Yq5W
+XihHiV0n/WkN7vLehuVGLknky6/u4rGabn6cnAZNNaf7VV2Ixj5R4p14mNtPARbh
+DimFvZOGSALxqoq1cyyjn6tlcOY0KGn1ge0ZDijZdrECgYEAvM1u51zibVU8lp5T
+76RkEVWoVNThkW3yWy2wyFU3OT25QC583sCzLLQ2EAbGX4MEf1n6rHCduUuduDs8
+uJI60i7Fxfr6wEefozHLvO/JDBhdwzzYDemTQKxR708ZO/IV1zhFIdWXy3HtKnHK
+qkIlerjtpwO6pXtg0tUgqt74ySI=";
 		}
 
 		public async Task<object> ApplyMent()
@@ -666,6 +693,18 @@ namespace Exaspher.WxPay.Core
 			int length = gcmBlockCipher.ProcessBytes(data, 0, data.Length, plaintext, 0);
 			gcmBlockCipher.DoFinal(plaintext, length);
 			return Encoding.UTF8.GetString(plaintext);
+		}
+
+		public string RSADecrypt(string cipherText)
+		{
+			var keyData = Convert.FromBase64String(_privateKey);
+			using var cngKey = CngKey.Import(keyData, CngKeyBlobFormat.Pkcs8PrivateBlob);
+			using var rsa = new RSACng(cngKey);
+			var data = Convert.FromBase64String(cipherText);
+
+			var decryptData = rsa.Decrypt(data, RSAEncryptionPadding.OaepSHA256);
+
+			return Encoding.UTF8.GetString(decryptData);
 		}
 	}
 }
