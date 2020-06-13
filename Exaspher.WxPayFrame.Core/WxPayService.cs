@@ -3,9 +3,12 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -272,7 +275,6 @@ namespace Exaspher.WxPay.Core
 
 		public RSA GetPrivateCertificate()
 		{
-
 			return null;
 
 			//var path = AppDomain.CurrentDomain.BaseDirectory + ConfigurationManager.AppSettings["WxPay:PrivateKey"];
@@ -295,6 +297,283 @@ namespace Exaspher.WxPay.Core
 				X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.MachineKeySet);
 			// var rsa = RSA.Create();
 			return cert;
+		}
+
+		public void UnifiedOrder()
+		{
+			var data = new SortedDictionary<string, object>();
+			data.Add("openid", "oPFdmxF0Sk1YVYi_IWafv7MR3_pI");
+			data.Add("body", "商品名称测试");
+			data.Add("attach", "支付测试");
+			data.Add("out_trade_no", "1415659990");
+			data.Add("sub_mch_id", "1600105465");
+			data.Add("total_fee", 1);
+			data.Add("time_start", DateTime.Now.ToString("yyyyMMddHHmmss"));
+			data.Add("time_expire", DateTime.Now.AddMinutes(10).ToString("yyyyMMddHHmmss"));
+
+			#region Debug
+
+			//data.Add("time_start", "20200613130004");
+			//data.Add("time_expire", "20200613131004");
+
+			#endregion Debug
+
+			data.Add("goods_tag", "");
+			data.Add("trade_type", "JSAPI");
+
+			data.Add("appid", "wx82fbe1be460a3cbf");
+			data.Add("mch_id", _mchId);
+			data.Add("spbill_create_ip", "8.8.8.8");
+			data.Add("notify_url", "http://www.weixin.qq.com/wxpay/pay.php");
+
+			string url = "https://api.mch.weixin.qq.com/pay/unifiedorder";
+			//检测必填参数
+			if (!data.ContainsKey("out_trade_no"))
+			{
+				throw new Exception("缺少统一支付接口必填参数out_trade_no！");
+			}
+			else if (!data.ContainsKey("body"))
+			{
+				throw new Exception("缺少统一支付接口必填参数body！");
+			}
+			else if (!data.ContainsKey("total_fee"))
+			{
+				throw new Exception("缺少统一支付接口必填参数total_fee！");
+			}
+			else if (!data.ContainsKey("trade_type"))
+			{
+				throw new Exception("缺少统一支付接口必填参数trade_type！");
+			}
+
+			//关联参数
+			if (data["trade_type"].ToString() == "JSAPI" && !data.ContainsKey("openid"))
+			{
+				throw new Exception("统一支付接口中，缺少必填参数openid！trade_type为JSAPI时，openid为必填参数！");
+			}
+			if (data["trade_type"].ToString() == "NATIVE" && !data.ContainsKey("product_id"))
+			{
+				throw new Exception("统一支付接口中，缺少必填参数product_id！trade_type为JSAPI时，product_id为必填参数！");
+			}
+
+			data.Add("nonce_str", "5K8264ILTKCH16CQ2502SI8ZNMTM67VS"); //长度32位以内
+			data.Add("sign_type", "HMAC-SHA256");//签名类型
+
+			var sign = MakeUnifiedOrderSign(data);
+
+			//签名
+			data.Add("sign", sign);
+			var xml = ToXml(data);
+
+			var start = DateTime.Now;
+
+			var client = new HttpClient();
+
+			string response = SendUnifiedOrder(xml, url, false, 6);
+
+			var end = DateTime.Now;
+
+			int timeCost = (int)((end - start).TotalMilliseconds);
+
+			// WxPayData result = new WxPayData();
+			// result.FromXml(response);
+
+			// ReportCostTime(url, timeCost, result);//测速上报
+
+			// return result;
+		}
+
+		public static bool CheckValidationResult(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
+		{
+			//直接确认，否则打不开
+			return true;
+		}
+
+		private string SendUnifiedOrder(string xml, string url, bool isUseCert, int timeout)
+		{
+			string result = "";//返回结果
+
+			HttpWebRequest request = null;
+			HttpWebResponse response = null;
+			Stream reqStream = null;
+
+			try
+			{
+				//设置最大连接数
+				ServicePointManager.DefaultConnectionLimit = 200;
+				//设置https验证方式
+				if (url.StartsWith("https", StringComparison.OrdinalIgnoreCase))
+				{
+					ServicePointManager.ServerCertificateValidationCallback =
+							new RemoteCertificateValidationCallback(CheckValidationResult);
+				}
+
+				/***************************************************************
+                * 下面设置HttpWebRequest的相关属性
+                * ************************************************************/
+				request = (HttpWebRequest)WebRequest.Create(url);
+				request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.97 Safari/537.36";
+				request.Method = "POST";
+				request.Timeout = timeout * 1000;
+
+				//设置代理服务器
+				//WebProxy proxy = new WebProxy();                          //定义一个网关对象
+				//proxy.Address = new Uri(WxPayConfig.PROXY_URL);              //网关服务器端口:端口
+				//request.Proxy = proxy;
+
+				//设置POST的数据类型和长度
+				request.ContentType = "text/xml";
+				byte[] data = System.Text.Encoding.UTF8.GetBytes(xml);
+				request.ContentLength = data.Length;
+
+				//是否使用证书
+				if (isUseCert)
+				{
+					request.ClientCertificates.Add(GetMerchantCertificate());
+				}
+
+				//往服务器写入数据
+				reqStream = request.GetRequestStream();
+				reqStream.Write(data, 0, data.Length);
+				reqStream.Close();
+
+				//获取服务端返回
+				response = (HttpWebResponse)request.GetResponse();
+
+				//获取服务端返回数据
+				var sr = new StreamReader(response.GetResponseStream(), Encoding.UTF8);
+				result = sr.ReadToEnd().Trim();
+				sr.Close();
+			}
+			catch (System.Threading.ThreadAbortException e)
+			{
+				System.Threading.Thread.ResetAbort();
+			}
+			catch (WebException e)
+			{
+				if (e.Status == WebExceptionStatus.ProtocolError)
+				{
+				}
+				throw new Exception(e.ToString());
+			}
+			catch (Exception e)
+			{
+				throw new Exception(e.ToString());
+			}
+			finally
+			{
+				//关闭连接和流
+				response?.Close();
+				request?.Abort();
+			}
+			return result;
+		}
+
+		private string ToXml(SortedDictionary<string, object> data)
+		{
+			//数据为空时不能转化为xml格式
+			if (0 == data.Count)
+			{
+				//Log.Error(this.GetType().ToString(), "WxPayData数据为空!");
+				throw new Exception("WxPayData数据为空!");
+			}
+
+			var xml = "<xml>";
+			foreach (var pair in data)
+			{
+				//字段值不能为null，会影响后续流程
+				if (pair.Value == null)
+				{
+					//Log.Error(this.GetType().ToString(), "WxPayData内部含有值为null的字段!");
+					throw new Exception("WxPayData内部含有值为null的字段!");
+				}
+
+				if (pair.Value is int)
+				{
+					xml += "<" + pair.Key + ">" + pair.Value + "</" + pair.Key + ">";
+				}
+				else if (pair.Value is string)
+				{
+					xml += "<" + pair.Key + ">" + "<![CDATA[" + pair.Value + "]]></" + pair.Key + ">";
+				}
+				else//除了string和int类型不能含有其他数据类型
+				{
+					throw new Exception("WxPayData字段数据类型错误!");
+				}
+			}
+			xml += "</xml>";
+			return xml;
+		}
+
+		private string MakeUnifiedOrderSign(SortedDictionary<string, object> data)
+		{
+			if (!data.ContainsKey("sign_type"))
+			{
+				throw new Exception("签名类型未设置");
+			}
+
+			//转url格式
+			var str = ToUrl(data);
+			//在string后加入API KEY
+			str += "&key=" + "66D54066affD50b5b20f257a8Db443a9"; // API密钥
+			if (data["sign_type"].ToString() == "MD5")
+			{
+				var md5 = MD5.Create();
+				var bs = md5.ComputeHash(Encoding.UTF8.GetBytes(str));
+				var sb = new StringBuilder();
+				foreach (var b in bs)
+				{
+					sb.Append(b.ToString("x2"));
+				}
+				//所有字符转为大写
+				return sb.ToString().ToUpper();
+			}
+			else if (data["sign_type"].ToString() == "HMAC-SHA256")
+			{
+				return CalcHMACSHA256Hash(str, "66D54066affD50b5b20f257a8Db443a9");
+			}
+			else
+			{
+				throw new Exception("sign_type 不合法");
+			}
+		}
+
+		private string CalcHMACSHA256Hash(string plaintext, string salt)
+		{
+			//var result = "";
+			//var enc = Encoding.Default;
+			//byte[]
+			//	baText2BeHashed = enc.GetBytes(plaintext),
+			//	baSalt = enc.GetBytes(salt);
+			//var hasher = new HMACSHA256(baSalt);
+			//var baHashedText = hasher.ComputeHash(baText2BeHashed);
+			//result = string.Join("", baHashedText.ToList().Select(b => b.ToString("x2")).ToArray());
+			//return result;
+
+			var encoding = new System.Text.UTF8Encoding();
+			var keyByte = encoding.GetBytes(salt);
+			var messageBytes = encoding.GetBytes(plaintext);
+			using var hmacsha256 = new HMACSHA256(keyByte);
+			byte[] hashmessage = hmacsha256.ComputeHash(messageBytes);
+			return string.Join("", hashmessage.ToList().Select(b => b.ToString("x2")).ToArray());
+		}
+
+		private string ToUrl(SortedDictionary<string, object> data)
+		{
+			var buff = "";
+			foreach (var pair in data)
+			{
+				if (pair.Value == null)
+				{
+					throw new Exception("WxPayData内部含有值为null的字段!");
+				}
+
+				if (pair.Key != "sign" && pair.Value.ToString() != "")
+				{
+					buff += pair.Key + "=" + pair.Value + "&";
+				}
+			}
+			buff = buff.Trim('&');
+			return buff;
 		}
 	}
 }

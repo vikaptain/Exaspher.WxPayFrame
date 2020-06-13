@@ -1,6 +1,5 @@
 ﻿using Exaspher.WxPay.Core;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using System.Web.Http;
 
 namespace Exaspher.WxPayFrame.Web.Controllers
@@ -14,10 +13,10 @@ namespace Exaspher.WxPayFrame.Web.Controllers
 		}
 
 		// GET api/values/5
-		public async Task<string> Get(int id)
+		public string Get(int id)
 		{
 			WxPayService service = new WxPayService();
-			await service.ApplyMent();
+			service.UnifiedOrder();
 			return "value";
 		}
 
