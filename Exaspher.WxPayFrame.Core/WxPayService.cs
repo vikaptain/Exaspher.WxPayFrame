@@ -4,6 +4,7 @@ using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Crypto.Parameters;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Configuration;
 using System.IO;
@@ -354,13 +355,6 @@ qkIlerjtpwO6pXtg0tUgqt74ySI=";
 			data.Add("time_start", DateTime.Now.ToString("yyyyMMddHHmmss"));
 			data.Add("time_expire", DateTime.Now.AddMinutes(10).ToString("yyyyMMddHHmmss"));
 
-			#region Debug
-
-			//data.Add("time_start", "20200613130004");
-			//data.Add("time_expire", "20200613131004");
-
-			#endregion Debug
-
 			data.Add("goods_tag", "");
 			data.Add("trade_type", "JSAPI");
 
@@ -464,7 +458,7 @@ qkIlerjtpwO6pXtg0tUgqt74ySI=";
 				//request.Proxy = proxy;
 
 				//设置POST的数据类型和长度
-				request.ContentType = "text/xml";
+				request.ContentType = "text/xml; charset=gb2312";
 				byte[] data = System.Text.Encoding.UTF8.GetBytes(xml);
 				request.ContentLength = data.Length;
 
@@ -477,7 +471,8 @@ qkIlerjtpwO6pXtg0tUgqt74ySI=";
 				//往服务器写入数据
 				reqStream = request.GetRequestStream();
 				reqStream.Write(data, 0, data.Length);
-				reqStream.Close();
+				// reqStream.Close();
+				// request.GetRequestStream().Write();
 
 				//获取服务端返回
 				response = (HttpWebResponse)request.GetResponse();
@@ -538,7 +533,7 @@ qkIlerjtpwO6pXtg0tUgqt74ySI=";
 				{
 					xml += "<" + pair.Key + ">" + "<![CDATA[" + pair.Value + "]]></" + pair.Key + ">";
 				}
-				else//除了string和int类型不能含有其他数据类型
+				else if (pair.Value is IList)
 				{
 					throw new Exception("WxPayData字段数据类型错误!");
 				}
@@ -705,6 +700,191 @@ qkIlerjtpwO6pXtg0tUgqt74ySI=";
 			var decryptData = rsa.Decrypt(data, RSAEncryptionPadding.OaepSHA256);
 
 			return Encoding.UTF8.GetString(decryptData);
+		}
+
+		public async Task<string> ProfitSharing()
+		{
+			var data = new ProfitSharingRequestData()
+			{
+				appid = _appId,
+				sub_mchid = "1600105465",
+				transaction_id = "4200000621202006141872335445",
+				out_order_no = "S200614131725278017000023",
+				finish = false,
+				receivers = new[]
+				{
+					//new ProfitSharingReceiverRequestData()
+					//{
+					//	type="MERCHANT_ID",
+					//	receiver_account="1600105465",
+					//	amount = 1,
+					//	description="分给商户",
+					//},
+					new ProfitSharingReceiverRequestData()
+					{
+						type="PERSONAL_OPENID",
+						receiver_account="oPFdmxF0kJ3N7WzPE_jp4BGmHF38",
+						amount = 1,
+						description="分给平台",
+					}
+				}
+			};
+
+			var jsonWriter = new JsonSerializer
+			{
+				NullValueHandling = NullValueHandling.Ignore
+			};
+
+			var jsonContent = JsonConvert.SerializeObject(data, Formatting.None,
+				new JsonSerializerSettings
+				{
+					NullValueHandling = NullValueHandling.Ignore
+				});
+
+			var httpHandler = new HttpHandler(_mchId, _serialNo, GetPublicCertificate().SerialNumber, GetPrivateCertificate(), GetMerchantCertificate(), jsonContent);
+			var client = new HttpClient(httpHandler);
+
+			var request = new HttpRequestMessage(HttpMethod.Post,
+				"https://api.mch.weixin.qq.com/v3/ecommerce/profitsharing/orders")
+			{
+				Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
+			};
+
+			var response = await client.SendAsync(request);
+			var result = await response.Content.ReadAsStringAsync();
+			if (response.StatusCode != HttpStatusCode.OK)
+			{
+			}
+
+			return string.Empty;
+		}
+
+		public async Task<string> ProfitSharingOld()
+		{
+			var data = new SortedDictionary<string, object>();
+			data.Add("mch_id", _mchId);
+			data.Add("sub_mch_id", "1600105465");
+			data.Add("appid", _appId);
+			// data.Add("nonce_str", "1415659990");
+			data.Add("sign_type", "HMAC-SHA256");
+			data.Add("transaction_id", "4200000621202006141872335445");
+			data.Add("out_order_no", "S200614131725278017000023");
+
+			// var receivers = new List<SortedDictionary<string, object>>();
+			var receiver = new SortedDictionary<string, object>();
+			receiver.Add("type", "PERSONAL_OPENID");
+			receiver.Add("account", "oPFdmxF0kJ3N7WzPE_jp4BGmHF38");
+			receiver.Add("amount", 1);
+			receiver.Add("description", "分给商户A");
+			data.Add("receivers", JsonConvert.SerializeObject(receiver));
+
+			string url = "https://api.mch.weixin.qq.com/secapi/pay/profitsharing";
+
+			data.Add("nonce_str", "5K8264ILTKCH16CQ2502SI8ZNMTM67VS"); //长度32位以内
+
+			var sign = MakeUnifiedOrderSign(data);
+
+			//签名
+			data.Add("sign", sign);
+			var xml = ToXml(data);
+
+			var start = DateTime.Now;
+
+			var client = new HttpClient();
+
+			string response = SendUnifiedOrder(xml, url, true, 6);
+
+			return string.Empty;
+		}
+
+		public async Task<string> ProfitSharingResult()
+		{
+			var httpHandler = new HttpHandler(_mchId, _serialNo, GetPublicCertificate().SerialNumber, GetPrivateCertificate(), GetMerchantCertificate());
+			var client = new HttpClient(httpHandler);
+
+			var request = new HttpRequestMessage(HttpMethod.Get,
+				$"https://api.mch.weixin.qq.com/v3/ecommerce/profitsharing/orders?sub_mchid=1600105465&transaction_id=4200000621202006141872335445&out_order_no=S200614131725278017000023");
+
+			var response = await client.SendAsync(request);
+			var result = await response.Content.ReadAsStringAsync();
+			if (response.StatusCode != HttpStatusCode.OK)
+			{
+			}
+
+			return string.Empty;
+		}
+
+		public async Task<string> AddReceivers()
+		{
+			var nonce = GenerateNonce();
+
+			#region 传入数据
+
+			var data = new AddReceiverRequestData()
+			{
+				appid = _appId,
+				type = "MERCHANT_ID",
+				account = "oPFdmxF0kJ3N7WzPE_jp4BGmHF38",
+				name = "个体李旭",
+				relation_type = "SERVICE_PROVIDER"
+			};
+
+			#endregion 传入数据
+
+			var jsonContent = JsonConvert.SerializeObject(data); //.Serialize(applyment);
+
+			var httpHandler = new HttpHandler(_mchId, _serialNo, GetPublicCertificate().SerialNumber, GetPrivateCertificate(), GetMerchantCertificate());
+			var client = new HttpClient(httpHandler);
+
+			var request = new HttpRequestMessage(HttpMethod.Post,
+				"https://api.mch.weixin.qq.com/v3/ecommerce/profitsharing/receivers/add")
+			{
+				Content = new StringContent(jsonContent, Encoding.UTF8, "application/json")
+			};
+
+			var response = await client.SendAsync(request);
+			var result = await response.Content.ReadAsStringAsync();
+			if (response.StatusCode != HttpStatusCode.OK)
+			{
+			}
+
+			return string.Empty;
+		}
+
+		public async Task<string> AddReceiversOld()
+		{
+			var data = new SortedDictionary<string, object>();
+			data.Add("mch_id", _mchId);
+			data.Add("sub_mch_id", "1600105465");
+			data.Add("appid", _appId);
+			data.Add("nonce_str", "5K8264ILTKCH16CQ2502SI8ZNMTM67VS");
+
+			string url = "https://api.mch.weixin.qq.com/pay/profitsharingaddreceiver";
+			data.Add("sign_type", "HMAC-SHA256");//签名类型
+
+			var revceiver = new SortedDictionary<string, object>();
+			revceiver.Add("type", "PERSONAL_OPENID");
+			revceiver.Add("account", "oPFdmxF0kJ3N7WzPE_jp4BGmHF38");
+			revceiver.Add("relation_type", "SERVICE_PROVIDER");
+
+			data.Add("receiver", JsonConvert.SerializeObject(revceiver));
+			var sign = MakeUnifiedOrderSign(data);
+
+			//签名
+			data.Add("sign", sign);
+			var xml = ToXml(data);
+
+			var start = DateTime.Now;
+
+			var client = new HttpClient();
+
+			string response = SendUnifiedOrder(xml, url, false, 6);
+
+			var end = DateTime.Now;
+
+			int timeCost = (int)((end - start).TotalMilliseconds);
+
+			return string.Empty;
 		}
 	}
 }
